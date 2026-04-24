@@ -229,7 +229,6 @@ with st.sidebar:
         "⚡ Tezkor ishga tushirish",
         "📁 Fayllarni yuklash",
         "🌐 NoSQL ma'lumotlari",
-        "1️⃣ Ma'lumot generatsiyasi",
         "2️⃣ Sifat tekshiruvi",
         "3️⃣ Ma'lumotlarni tozalash",
         "4️⃣ Validatsiya",
@@ -850,31 +849,301 @@ elif page == "3️⃣ Ma'lumotlarni tozalash":
 elif page == "4️⃣ Validatsiya":
     st.markdown("""
     <div class="platform-header"><h1>4️⃣ Validatsiya</h1>
-    <div class="subtitle">15+ bank qoidalari</div></div>
+    <div class="subtitle">Bank qoidalari tekshiruvi · Avtomatik tuzatish · errors.csv</div></div>
     """, unsafe_allow_html=True)
-    
+
     if st.session_state.clean_data is None:
         st.warning("⚠️ Avval ma'lumotlarni tozalang"); st.stop()
-    
-    if st.button("✔️ Validatsiya", type="primary", use_container_width=True):
-        with st.spinner("..."):
-            st.session_state.validation_results = validate_dataset(st.session_state.clean_data)
-        st.success("✅ Tayyor!")
-    
-    if st.session_state.validation_results is not None:
-        r = st.session_state.validation_results
-        total = len(r['checks'])
-        p = sum(1 for c in r['checks'] if c['status'] == 'passed')
-        w = sum(1 for c in r['checks'] if c['status'] == 'warning')
-        f = sum(1 for c in r['checks'] if c['status'] == 'failed')
-        c1, c2, c3, c4 = st.columns(4)
-        with c1: st.metric("Jami", total)
-        with c2: st.metric("✅", p)
-        with c3: st.metric("⚠️", w)
-        with c4: st.metric("❌", f)
-        for c in r['checks']:
-            icon = {"passed": "✅", "warning": "⚠️", "failed": "❌"}[c['status']]
-            st.markdown(f"{icon} **{c['rule']}** — {c['message']}")
+
+    # ---- AVTOMATIK TUZATISH FUNKSIYASI ----
+    def auto_fix_data(data: dict) -> tuple[dict, list]:
+        """100% xavfsiz xatolarni avtomatik tuzatadi. Qaytaradi: (tuzatilgan_data, tuzatishlar_logi)"""
+        import re as _re
+        fixed = {}
+        log = []
+
+        STATUS_FIXES = {
+            'actve': 'Active', 'acitve': 'Active', 'actief': 'Active',
+            'inactve': 'Inactive', 'inatcive': 'Inactive',
+            'activ': 'Active', 'aktivnyy': 'Active',
+        }
+        INVALID_DATES = {'9999-99-99', '0000-00-00', '1900-01-01', 'null', 'none', 'nan', ''}
+
+        for tname, df in data.items():
+            df = df.copy()
+
+            for col in df.columns:
+                # 1. STATUS typo tuzatish
+                if col in ('status', 'Status'):
+                    def fix_status(v):
+                        if pd.isna(v): return v
+                        s = str(v).strip()
+                        low = s.lower()
+                        if low in STATUS_FIXES:
+                            log.append(f"{tname}.{col}: '{s}' → '{STATUS_FIXES[low]}'")
+                            return STATUS_FIXES[low]
+                        return s
+                    df[col] = df[col].apply(fix_status)
+
+                # 2. Sana noto'g'ri formatlar → NULL
+                if any(x in col.lower() for x in ['date', 'at', 'time']):
+                    def fix_date(v):
+                        if pd.isna(v): return v
+                        s = str(v).strip().lower()
+                        if s in INVALID_DATES:
+                            log.append(f"{tname}.{col}: '{v}' → NULL (noto'g'ri sana)")
+                            return None
+                        # Yil > 2100 yoki < 1900
+                        year_match = _re.match(r'^(\d{4})', s)
+                        if year_match:
+                            y = int(year_match.group(1))
+                            if y > 2100 or y < 1900:
+                                log.append(f"{tname}.{col}: '{v}' → NULL (yil {y} noto'g'ri)")
+                                return None
+                        return v
+                    df[col] = df[col].apply(fix_date)
+
+                # 3. Matn ustunlarda bo'shliq tozalash va KATTA HARF → Title Case
+                if df[col].dtype == object:
+                    def fix_text(v):
+                        if pd.isna(v): return v
+                        s = str(v).strip()
+                        # Bo'shliqlar
+                        s_stripped = ' '.join(s.split())
+                        if s_stripped != str(v).strip():
+                            log.append(f"{tname}.{col}: bo'shliq tozalandi")
+                        return s_stripped
+                    df[col] = df[col].apply(fix_text)
+
+                # 4. Ism/familiya KATTA HARF → Title Case (faqat first_name, last_name)
+                if col in ('first_name', 'last_name', 'name'):
+                    def fix_case(v):
+                        if pd.isna(v): return v
+                        s = str(v).strip()
+                        if s.isupper() and len(s) > 1:
+                            fixed_v = s.title()
+                            log.append(f"{tname}.{col}: '{s}' → '{fixed_v}' (registr)")
+                            return fixed_v
+                        return s
+                    df[col] = df[col].apply(fix_case)
+
+            fixed[tname] = df
+
+        return fixed, log
+
+    # ---- ERRORS.CSV GENERATSIYA FUNKSIYASI ----
+    def generate_errors_csv(data: dict, validation_result: dict) -> pd.DataFrame:
+        """Qo'lda tuzatish kerak bo'lgan xatolar ro'yxatini qaytaradi."""
+        errors = []
+
+        for tname, df in data.items():
+            # NULL client_id
+            if 'client_id' in df.columns:
+                null_ids = df[df['client_id'].isna()]
+                for idx in null_ids.index:
+                    errors.append({
+                        'jadval': tname, 'qator': int(idx),
+                        'ustun': 'client_id', 'xato_turi': 'NULL qiymat',
+                        'joriy_qiymat': 'NULL',
+                        'tavsiya': 'Mijoz ID sini qo\'lda kiriting'
+                    })
+
+            # Noto'g'ri telefon
+            if 'contacts_phone' in df.columns or 'phone' in df.columns:
+                pcol = 'contacts_phone' if 'contacts_phone' in df.columns else 'phone'
+                for idx, row in df.iterrows():
+                    v = row[pcol]
+                    if pd.notna(v) and str(v).strip() not in ('', 'None'):
+                        phone = str(v).strip()
+                        if len(phone) < 9 or not any(c.isdigit() for c in phone):
+                            errors.append({
+                                'jadval': tname, 'qator': int(idx),
+                                'ustun': pcol, 'xato_turi': 'Noto\'g\'ri telefon formati',
+                                'joriy_qiymat': phone,
+                                'tavsiya': '+998XX XXXXXXX formatida kiriting'
+                            })
+
+            # Noto'g'ri email
+            ecol = None
+            for c in ['contacts_email', 'email', 'Email']:
+                if c in df.columns:
+                    ecol = c; break
+            if ecol:
+                for idx, row in df.iterrows():
+                    v = row[ecol]
+                    if pd.notna(v) and str(v).strip() not in ('', 'None'):
+                        email = str(v).strip()
+                        if '@@' in email or '..' in email or '@' not in email:
+                            errors.append({
+                                'jadval': tname, 'qator': int(idx),
+                                'ustun': ecol, 'xato_turi': 'Noto\'g\'ri email formati',
+                                'joriy_qiymat': email,
+                                'tavsiya': 'To\'g\'ri email kiriting: nomi@domen.uz'
+                            })
+
+            # NULL muhim maydonlar
+            for col in ['status']:
+                if col in df.columns:
+                    for idx, row in df.iterrows():
+                        if pd.isna(row[col]):
+                            errors.append({
+                                'jadval': tname, 'qator': int(idx),
+                                'ustun': col, 'xato_turi': 'NULL qiymat',
+                                'joriy_qiymat': 'NULL',
+                                'tavsiya': 'Active yoki Inactive kiriting'
+                            })
+
+            # Manfiy balans (kreditdan tashqari)
+            if 'balance' in df.columns and tname != 'loans':
+                neg = df[df['balance'] < 0] if df['balance'].dtype in [float, int] else pd.DataFrame()
+                for idx in neg.index:
+                    errors.append({
+                        'jadval': tname, 'qator': int(idx),
+                        'ustun': 'balance', 'xato_turi': 'Manfiy balans',
+                        'joriy_qiymat': str(neg.loc[idx, 'balance']),
+                        'tavsiya': 'Balansni tekshiring — 0 dan katta bo\'lishi kerak'
+                    })
+
+        return pd.DataFrame(errors) if errors else pd.DataFrame(
+            columns=['jadval','qator','ustun','xato_turi','joriy_qiymat','tavsiya'])
+
+    # ---- ASOSIY VALIDATSIYA UI ----
+    tab_val, tab_fix, tab_upload = st.tabs([
+        "✔️ Validatsiya",
+        "🔧 Avtomatik tuzatish",
+        "📤 errors.csv qayta yuklash"
+    ])
+
+    with tab_val:
+        if st.button("✔️ Validatsiyani boshlash", type="primary", use_container_width=True):
+            with st.spinner("Tekshirilmoqda..."):
+                st.session_state.validation_results = validate_dataset(st.session_state.clean_data)
+            st.success("✅ Validatsiya tugadi!")
+
+        if st.session_state.validation_results is not None:
+            r = st.session_state.validation_results
+            total = len(r['checks'])
+            p = sum(1 for c in r['checks'] if c['status'] == 'passed')
+            w = sum(1 for c in r['checks'] if c['status'] == 'warning')
+            f = sum(1 for c in r['checks'] if c['status'] == 'failed')
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1: st.metric("Jami qoidalar", total)
+            with c2: st.metric("✅ O'tdi", p)
+            with c3: st.metric("⚠️ Ogohlantirish", w)
+            with c4: st.metric("❌ Xato", f)
+
+            if f > 0:
+                st.error(f"❌ {f} ta qoida bajarilmadi — pastda **errors.csv** yuklab oling")
+            elif w > 0:
+                st.warning(f"⚠️ {w} ta ogohlantirish bor — ko'rib chiqing")
+            else:
+                st.success("🎉 Barcha qoidalar o'tdi! KPI hisoblashga o'ting.")
+
+            with st.expander("📋 Barcha qoidalar ro'yxati", expanded=True):
+                for c in r['checks']:
+                    icon = {"passed": "✅", "warning": "⚠️", "failed": "❌"}[c['status']]
+                    color = {"passed": "#10b981", "warning": "#f59e0b", "failed": "#ef4444"}[c['status']]
+                    st.markdown(
+                        f"<div style='padding:6px 12px; margin:4px 0; border-left:3px solid {color}; "
+                        f"background:rgba(255,255,255,0.05); border-radius:4px;'>"
+                        f"{icon} <b>{c['rule']}</b> — {c['message']}</div>",
+                        unsafe_allow_html=True)
+
+            # errors.csv yuklash
+            st.markdown("---")
+            st.markdown("### 📥 Xatolar hisoboti")
+            err_df = generate_errors_csv(st.session_state.clean_data, r)
+            if len(err_df) > 0:
+                st.warning(f"**{len(err_df)} ta xato** qo'lda tuzatish talab qiladi:")
+                st.dataframe(err_df, use_container_width=True, hide_index=True)
+                csv_bytes = err_df.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    "⬇️ errors.csv yuklab olish",
+                    data=csv_bytes,
+                    file_name="errors.csv",
+                    mime="text/csv",
+                    use_container_width=True)
+            else:
+                st.success("✅ Qo'lda tuzatish talab qiladigan xatolar yo'q!")
+
+    with tab_fix:
+        st.markdown("### 🔧 Avtomatik tuzatish")
+        st.info("""
+        **Faqat 100% xavfsiz tuzatishlar bajariladi:**
+        - `Actve`, `Activ` → `Active` (status typo)
+        - `9999-99-99`, `0000-00-00` → NULL (noto'g'ri sana)
+        - `JASUR TOSHMATOV` → `Jasur Toshmatov` (registr)
+        - Ortiqcha bo'shliqlar tozalanadi
+
+        **Avtomatik tuzatilmaydi** (errors.csv ga tushadi):
+        - client_id = NULL, noto'g'ri telefon, email, manfiy balans
+        """)
+
+        if st.button("🔧 Avtomatik tuzatishni boshlash", type="primary", use_container_width=True):
+            with st.spinner("Tuzatilmoqda..."):
+                fixed_data, fix_log = auto_fix_data(st.session_state.clean_data)
+                st.session_state.clean_data = fixed_data
+                # Validatsiyani reset — qayta o'tkazish kerak
+                st.session_state.validation_results = None
+
+            if fix_log:
+                st.success(f"✅ **{len(fix_log)} ta tuzatish** bajarildi!")
+                with st.expander("📋 Tuzatishlar logi", expanded=True):
+                    for item in fix_log:
+                        st.markdown(f"✓ {item}")
+                st.info("➡️ **Validatsiya** tabiga o'tib qayta tekshiring")
+            else:
+                st.success("✅ Avtomatik tuziladigan xatolar yo'q edi!")
+
+    with tab_upload:
+        st.markdown("### 📤 Tuzatilgan errors.csv ni qayta yuklash")
+        st.info("""
+        **Jarayon:**
+        1. **Validatsiya** tabidan `errors.csv` yuklab oling
+        2. Excelda oching → `joriy_qiymat` ustunidagi xatolarni tuzating
+        3. Faylni bu yerga yuklang → ma'lumotlar yangilanadi
+        4. Validatsiyadan qayta o'ting
+        """)
+
+        errors_upload = st.file_uploader(
+            "Tuzatilgan errors.csv faylni yuklang",
+            type=['csv'], key="errors_csv_uploader")
+
+        if errors_upload:
+            try:
+                err_df = pd.read_csv(errors_upload)
+                st.success(f"✅ {len(err_df)} ta qator yuklandi")
+                st.dataframe(err_df.head(20), use_container_width=True)
+
+                if st.button("✅ Tuzatishlarni qo'llash", type="primary", use_container_width=True):
+                    applied = 0
+                    data = {k: v.copy() for k, v in st.session_state.clean_data.items()}
+
+                    for _, row in err_df.iterrows():
+                        tname = str(row.get('jadval', ''))
+                        qator = row.get('qator', None)
+                        ustun = str(row.get('ustun', ''))
+                        # Yangi qiymat: errors.csv da 'yangi_qiymat' ustuni bo'lsa
+                        new_val = row.get('yangi_qiymat', row.get('joriy_qiymat', None))
+
+                        if tname in data and ustun in data[tname].columns:
+                            try:
+                                idx = int(qator)
+                                if idx in data[tname].index:
+                                    data[tname].at[idx, ustun] = new_val
+                                    applied += 1
+                            except (ValueError, TypeError):
+                                pass
+
+                    st.session_state.clean_data = data
+                    st.session_state.validation_results = None
+                    st.success(
+                        f"✅ **{applied} ta tuzatish qo'llandi!** "
+                        f"Endi **Validatsiya** tabiga o'tib qayta tekshiring.")
+
+            except Exception as e:
+                st.error(f"❌ Xato: {str(e)}")
 
 # ============= 5. KPI =============
 elif page == "5️⃣ KPI hisoblash":
