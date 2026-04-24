@@ -284,6 +284,68 @@ with st.sidebar:
 
 
 # ============= ASOSIY SAHIFA =============
+def normalize_for_marts(data: dict) -> dict:
+    """NoSQL yoki noodatiy ustun nomlarini data_mart.py kutgan standart nomlarga moslashtiradi."""
+    normalized = {}
+    for table_name, df in data.items():
+        df = df.copy()
+        cols = df.columns.tolist()
+
+        if table_name == 'clients':
+            # region: contacts_address_region yoki contacts.address.region → region
+            if 'region' not in cols:
+                for candidate in ['contacts_address_region', 'contacts.address.region',
+                                  'address_region', 'viloyat']:
+                    if candidate in cols:
+                        df['region'] = df[candidate]
+                        break
+                else:
+                    df['region'] = 'Noma\'lum'
+
+            # client_type: tags birinchi elementi yoki unknown
+            if 'client_type' not in cols:
+                if 'tags' in cols:
+                    def get_first_tag(t):
+                        if isinstance(t, list) and len(t) > 0:
+                            return t[0]
+                        if isinstance(t, str) and t:
+                            return t
+                        return 'regular'
+                    df['client_type'] = df['tags'].apply(get_first_tag)
+                else:
+                    df['client_type'] = 'regular'
+
+            # inn — majburiy emas, lekin data_mart talab qilsa
+            if 'inn' not in cols:
+                df['inn'] = None
+
+            # birth_date
+            if 'birth_date' not in cols:
+                df['birth_date'] = None
+
+        if table_name == 'accounts':
+            if 'account_type' not in cols and 'type' in cols:
+                df['account_type'] = df['type']
+            if 'account_number' not in cols:
+                df['account_number'] = df.get('account_id', df.index.astype(str))
+
+        if table_name == 'transactions':
+            if 'transaction_date' not in cols:
+                for c in ['date', 'created_at', 'timestamp']:
+                    if c in cols:
+                        df['transaction_date'] = df[c]; break
+                else:
+                    df['transaction_date'] = pd.Timestamp.now()
+            if 'operation_type' not in cols:
+                df['operation_type'] = 'unknown'
+            if 'channel' not in cols:
+                df['channel'] = 'unknown'
+
+        normalized[table_name] = df
+    return normalized
+
+
+
 if page == "🏠 Platforma haqida":
     st.markdown("""
     <div class="platform-header">
@@ -612,18 +674,39 @@ elif page == "🌐 NoSQL ma'lumotlari":
                     types, index=idx, format_func=lambda x: type_labels[x])
                 
                 if selected_type != 'unknown':
-                    if st.button(f"✅ Ushbu NoSQL ma'lumotlarini qo'shish ({type_labels[selected_type]})",
+                    # Mavjud ma'lumotlar haqida ogohlantirish
+                    if st.session_state.raw_data:
+                        existing = list(st.session_state.raw_data.keys())
+                        nosql_mode = st.radio(
+                            "Saqlash rejimi:",
+                            ["Yangi sessiya (eski ma'lumotlarni O'CHIRISH)",
+                             "Qo'shib saqlash (mavjud ma'lumotlarga QO'SHISH)"],
+                            index=0, key="nosql_save_mode")
+                        nosql_replace = nosql_mode.startswith("Yangi")
+                        if nosql_replace:
+                            st.caption(f"Mavjud '{', '.join(existing)}' o'chib, faqat bu fayl qoladi.")
+                        else:
+                            st.caption(f"Bu fayl '{', '.join(existing)}' ga qo'shiladi.")
+                    else:
+                        nosql_replace = True
+
+                    if st.button(f"✅ Saqlash — {type_labels[selected_type]} ({len(df):,} qator)",
                                  type="primary", use_container_width=True):
-                        if st.session_state.raw_data is None:
-                            st.session_state.raw_data = {}
-                        st.session_state.raw_data[selected_type] = df
-                        st.session_state.data_source = f"NoSQL: {nosql_file.name}"
-                        # FIX: Keyingi bosqichlarni reset qilish
+                        # Barcha pipeline bosqichlarini reset
                         for rk in ['clean_data', 'clean_reports', 'validation_results',
                                    'kpis', 'analytics', 'marts']:
                             st.session_state[rk] = None
-                        st.success(f"✅ NoSQL ma'lumotlari qo'shildi: **{type_labels[selected_type]}**!")
-                        st.info("➡️ Endi chap menyu → **2️⃣ Sifat tekshiruvi** ga o'ting")
+                        # Replace yoki qo'shish
+                        if nosql_replace or st.session_state.raw_data is None:
+                            st.session_state.raw_data = {}
+                        st.session_state.raw_data[selected_type] = df
+                        st.session_state.data_source = f"NoSQL: {nosql_file.name}"
+                        count = len(st.session_state.raw_data)
+                        st.success(
+                            f"✅ **{type_labels[selected_type]}** saqlandi — {len(df):,} ta hujjat. "
+                            f"Sessiyada jami: {count} ta jadval."
+                        )
+                        st.info("➡️ Chap menyu → **2️⃣ Sifat tekshiruvi**")
             
             except Exception as e:
                 st.error(f"❌ Xato: {str(e)}")
@@ -883,8 +966,7 @@ elif page == "6️⃣ Kengaytirilgan tahlil":
             with c2: st.metric("Depozitlar", f"{liq['total_deposits']/1e9:.2f} mlrd")
             with c3: st.metric("Gap", f"{liq['liquidity_gap']/1e9:.2f} mlrd")
 
-# ============= 7. VITRINALAR =============
-elif page == "7️⃣ Ma'lumot vitrinalari":
+if page == "7️⃣ Ma'lumot vitrinalari":
     st.markdown("""
     <div class="platform-header"><h1>7️⃣ Ma'lumot vitrinalari</h1>
     <div class="subtitle">Star Schema · Dim · Fact · Aggregates</div></div>
@@ -895,8 +977,14 @@ elif page == "7️⃣ Ma'lumot vitrinalari":
     
     if st.button("🏗️ Vitrinalarni qurish", type="primary", use_container_width=True):
         with st.spinner("..."):
-            st.session_state.marts = build_marts(st.session_state.clean_data)
-        st.success("✅ Tayyor!")
+            try:
+                normalized_data = normalize_for_marts(st.session_state.clean_data)
+                st.session_state.marts = build_marts(normalized_data)
+                st.success(f"✅ {len(st.session_state.marts)} ta vitrina qurildi!")
+            except Exception as e:
+                st.error(f"❌ Xato: {str(e)}")
+                st.info("💡 data_mart.py dan kutilgan ustunlar mavjud emas. "
+                        "Murojaat qiling: normalize_for_marts() funksiyasini kengaytirish kerak.")
     
     if st.session_state.marts is not None:
         st.markdown(f"### 📦 Vitrinalar: **{len(st.session_state.marts)}**")
