@@ -408,15 +408,23 @@ elif page == "📁 Fayllarni yuklash":
     </div>
     """, unsafe_allow_html=True)
     
-    # FIX: Mavjud ma'lumotlar haqida ogohlantirish
+    # FIX v1.2: Yuklash rejimini tanlash
     if st.session_state.raw_data:
         existing = list(st.session_state.raw_data.keys())
-        st.warning(
-            f"⚠️ **Sessiyada mavjud ma'lumotlar:** {', '.join(existing)}. "
-            f"Yangi fayl yuklasangiz, ular **qo'shiladi** (almashtirilmaydi). "
-            f"Tozalash uchun chap menyu pastidagi **🗑️ Barcha ma'lumotlarni tozalash** tugmasini bosing."
-        )
-    
+        st.warning(f"Sessiyada mavjud: **{', '.join(existing)}**")
+        upload_mode = st.radio(
+            "Yuklash rejimi:",
+            ["Yangi yuklash (ESKI MA'LUMOTLARNI O'CHIRISH)",
+             "Qo'shib yuklash (mavjud ma'lumotlarga QO'SHISH)"],
+            index=0, key="upload_mode")
+        replace_mode = upload_mode.startswith("Yangi")
+        if replace_mode:
+            st.info("Fayllar yuklanishi bilanoq barcha eski ma'lumotlar o'chiriladi.")
+        else:
+            st.info(f"Yangi fayllar qo'shiladi: {', '.join(existing)}")
+    else:
+        replace_mode = True
+
     st.info("""
     **Qo'llanma:**
     1. Bank ma'lumotlari fayllarini yuklang
@@ -498,11 +506,13 @@ elif page == "📁 Fayllarni yuklash":
                     
                     if manual_type != 'unknown':
                         loaded_data[manual_type] = df
+                        # FIX v1.2: replace_mode bo'lsa — birinchi faylda eski ma'lumotlarni tozalash
+                        if replace_mode and idx == 0 and st.session_state.raw_data:
+                            st.session_state.raw_data = {}
                         if st.session_state.raw_data is None:
                             st.session_state.raw_data = {}
                         st.session_state.raw_data[manual_type] = df
                         st.session_state.data_source = "Yuklangan fayllar"
-                        # FIX: Tozalash kerak bo'lgan qadamlarni reset qilish
                         for rk in ['clean_data', 'clean_reports', 'validation_results',
                                    'kpis', 'analytics', 'marts']:
                             st.session_state[rk] = None
@@ -957,4 +967,3 @@ elif page == "❓ Qanday foydalanish":
         2. Platforma nested strukturalarni tekislaydi
         3. Tur tanlang → **✅ Qo'shish** → **2️⃣ Sifat tekshiruvi**
         """)
-
