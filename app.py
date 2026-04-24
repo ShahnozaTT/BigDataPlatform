@@ -1434,45 +1434,110 @@ elif page == "📊 Tahlil natijalari":
             use_container_width=True)
 
     with tab2:
-        st.markdown("### 🔀 J-Curve effekti: Big Data → ROA")
-        st.info("**Dissertatsiya asosiy xulosasi:** Big Data investitsiyalari qisqa muddatda ROA ni pasaytiradi (xarajatlar o\'sadi), uzoq muddatda ijobiy ta\'sir — **J-curve effekti** *(Beccalli 2007; Berger 2003)*")
-        c1,c2 = st.columns(2)
+        st.markdown("### 🔀 J-Curve effekti: Big Data → Bank samaradorligi")
+        st.info("""
+        **Dissertatsiya asosiy xulosasi:** Big Data investitsiyalari qisqa muddatda samaradorlikni pasaytiradi 
+        (IT xarajatlari o'sadi), uzoq muddatda ijobiy ta'sir ko'rsatadi — **J-curve effekti** 
+        *(Beccalli 2007; Berger 2003)*
+        """)
+
+        # Tanlov
+        col_a, col_b = st.columns([1, 1])
+        with col_a:
+            jc_metric = st.selectbox(
+                "📊 Ko'rsatkich tanlang:",
+                ["ROA — Aktivlar rentabelligi",
+                 "ROE — Kapital rentabelligi",
+                 "NIM — Sof foizli marja",
+                 "NPL — Muammoli kreditlar (teskari J)"],
+                index=0, key="jc_metric")
+        with col_b:
+            jc_bank = st.selectbox(
+                "🏦 Bank tanlang (yuqori-chap grafik uchun):",
+                BANKS, index=0, key="jc_bank")
+
+        metric_map = {
+            "ROA — Aktivlar rentabelligi":       ("ROA",  "ROA (%)",  "#f59e0b", False),
+            "ROE — Kapital rentabelligi":        ("ROE",  "ROE (%)",  "#10b981", False),
+            "NIM — Sof foizli marja":            ("NIM",  "NIM (%)",  "#a78bfa", False),
+            "NPL — Muammoli kreditlar (teskari J)":("NPL","NPL (%)",  "#ef4444", True),
+        }
+        m_key, m_label, m_color, is_inverse = metric_map[jc_metric]
+
+        c1, c2 = st.columns(2)
+
+        # ---- CHAP: Tanlangan bank dinamikasi ----
         with c1:
-            xb = df_panel[(df_panel["Bank"]=="Xalq Bank")&df_panel["BD_it"].notna()&df_panel["ROA"].notna()]
+            bank_data = df_panel[(df_panel["Bank"]==jc_bank)
+                                  & df_panel["BD_it"].notna()
+                                  & df_panel[m_key].notna()]
             fig_j = go.Figure()
-            fig_j.add_trace(go.Scatter(x=xb["Year"],y=xb["BD_it"],name="BD_it (%)",
-                mode="lines+markers",line=dict(color="#60a5fa",width=2.5),marker=dict(size=8),yaxis="y"))
-            fig_j.add_trace(go.Scatter(x=xb["Year"],y=xb["ROA"],name="ROA (%)",
-                mode="lines+markers",line=dict(color="#f59e0b",width=2.5,dash="dot"),marker=dict(size=8),yaxis="y2"))
-            fig_j.add_hline(y=0,line_dash="dash",line_color="#64748b")
-            fig_j.update_layout(title="Xalq Bank: BD_it va ROA (2019–2024)",height=360,
-                paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(30,41,59,0.5)",font=dict(color="white"),
-                legend=dict(bgcolor="rgba(30,41,59,0.8)"),
-                xaxis=dict(tickvals=YEARS,gridcolor="#334155"),
-                yaxis=dict(title=dict(text="BD_it (%)",font=dict(color="#60a5fa")),gridcolor="#334155"),
-                yaxis2=dict(title=dict(text="ROA (%)",font=dict(color="#f59e0b")),overlaying="y",side="right",
-                           zeroline=True,zerolinecolor="#64748b"))
+            fig_j.add_trace(go.Scatter(
+                x=bank_data["Year"], y=bank_data["BD_it"], name="BD_it (%)",
+                mode="lines+markers", line=dict(color="#60a5fa", width=2.5),
+                marker=dict(size=9), yaxis="y"))
+            fig_j.add_trace(go.Scatter(
+                x=bank_data["Year"], y=bank_data[m_key], name=m_label,
+                mode="lines+markers", line=dict(color=m_color, width=2.5, dash="dot"),
+                marker=dict(size=9), yaxis="y2"))
+            fig_j.add_hline(y=0, line_dash="dash", line_color="#64748b")
+            fig_j.update_layout(
+                title=f"{jc_bank}: BD_it va {m_key} dinamikasi",
+                height=380,
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(30,41,59,0.5)",
+                font=dict(color="white"),
+                legend=dict(bgcolor="rgba(30,41,59,0.8)", x=0.01, y=0.99),
+                xaxis=dict(tickvals=YEARS, gridcolor="#334155", title="Yil"),
+                yaxis=dict(title=dict(text="BD_it (%)", font=dict(color="#60a5fa")),
+                           gridcolor="#334155"),
+                yaxis2=dict(title=dict(text=m_label, font=dict(color=m_color)),
+                            overlaying="y", side="right",
+                            zeroline=True, zerolinecolor="#64748b"))
             st.plotly_chart(fig_j, use_container_width=True)
+
+        # ---- O'NG: Scatter barcha banklar ----
         with c2:
-            df_sc = df_panel[df_panel["BD_it"].notna()&df_panel["ROA"].notna()].copy()
+            df_sc = df_panel[df_panel["BD_it"].notna() & df_panel[m_key].notna()].copy()
             fig_sc = go.Figure()
             for bank in BANKS:
                 sub = df_sc[df_sc["Bank"]==bank]
+                if len(sub) == 0: continue
                 fig_sc.add_trace(go.Scatter(
-                    x=sub["BD_it"],y=sub["ROA"],mode="markers+text",name=bank,
-                    text=sub["Year"].astype(str),textposition="top center",textfont=dict(size=9,color="white"),
-                    marker=dict(size=10,color=BANK_COLORS[bank],line=dict(width=1,color="white")),
-                    hovertemplate=f"<b>{bank}</b><br>BD_it: %{{x:.2f}}%<br>ROA: %{{y:.2f}}%<br>%{{text}}<extra></extra>"))
-            fig_sc.add_hline(y=0,line_dash="dash",line_color="#64748b")
-            fig_sc.update_layout(title="BD_it vs ROA (barcha banklar)",height=360,
-                paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(30,41,59,0.5)",font=dict(color="white"),
-                legend=dict(bgcolor="rgba(30,41,59,0.8)",font=dict(size=10)),
-                xaxis=dict(title="BD_it (%)",gridcolor="#334155"),
-                yaxis=dict(title="ROA (%)",gridcolor="#334155"))
+                    x=sub["BD_it"], y=sub[m_key],
+                    mode="markers+text", name=bank,
+                    text=sub["Year"].astype(str), textposition="top center",
+                    textfont=dict(size=9, color="white"),
+                    marker=dict(size=11, color=BANK_COLORS[bank],
+                               line=dict(width=1, color="white")),
+                    hovertemplate=f"<b>{bank}</b><br>BD_it: %{{x:.2f}}%<br>{m_label}: %{{y:.2f}}<br>%{{text}}<extra></extra>"))
+            fig_sc.add_hline(y=0, line_dash="dash", line_color="#64748b")
+            fig_sc.update_layout(
+                title=f"BD_it vs {m_key} (barcha banklar · 2018–2024)",
+                height=380,
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(30,41,59,0.5)",
+                font=dict(color="white"),
+                legend=dict(bgcolor="rgba(30,41,59,0.8)", font=dict(size=10)),
+                xaxis=dict(title="BD_it (%)", gridcolor="#334155"),
+                yaxis=dict(title=m_label, gridcolor="#334155"))
             st.plotly_chart(fig_sc, use_container_width=True)
+
+        # J-Curve ta'rifi (tanlangan ko'rsatkich uchun)
+        if is_inverse:
+            st.warning(f"""
+            **⚠️ Teskari J-curve ({m_key}):** Big Data joriy qilinganda muammoli kreditlar **dastlab ko'payadi** 
+            (yangi skoring modellari ECL ni to'liqroq aniqlaydi — IFRS 9 effekti), **keyin kamayadi** 
+            (aniq risk tahlili tufayli). Bu ijobiy signal — banklar riskni yaxshiroq boshqara boshlaydi.
+            """)
+        else:
+            st.success(f"""
+            **✅ Klassik J-curve ({m_key}):** Big Data investitsiyalari dastlab {m_key} ni **pasaytiradi** 
+            (IT xarajatlari o'sadi), keyin **oshiradi** (avtomatlashtirish samaradorligi).
+            """)
+
+        # Klassik J-curve SVG diagrammasi
         j_svg = """<svg viewBox="0 0 700 260" xmlns="http://www.w3.org/2000/svg"
              style="width:100%;max-width:700px;background:rgba(30,41,59,0.8);border-radius:12px">
-          <text x="350" y="28" text-anchor="middle" fill="#f1f5f9" font-size="14" font-weight="bold">J-Curve: Big Data investitsiyalari → ROA dinamikasi</text>
+          <text x="350" y="28" text-anchor="middle" fill="#f1f5f9" font-size="14" font-weight="bold">J-Curve: Big Data investitsiyalari → Samaradorlik dinamikasi</text>
           <line x1="80" y1="210" x2="650" y2="210" stroke="#64748b" stroke-width="1.5"/>
           <line x1="80" y1="40"  x2="80"  y2="210" stroke="#64748b" stroke-width="1.5"/>
           <line x1="80" y1="135" x2="650" y2="135" stroke="#64748b" stroke-width="1" stroke-dasharray="4,4"/>
