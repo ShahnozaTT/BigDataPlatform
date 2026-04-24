@@ -1407,8 +1407,29 @@ elif page == "📊 Tahlil natijalari":
             yaxis=dict(gridcolor="#334155",title=y_label))
         st.plotly_chart(fig, use_container_width=True)
         pivot = df_panel.pivot_table(index="Bank",columns="Year",values=col_key,aggfunc="mean").round(2)
-        st.dataframe(pivot.style.format("{:.2f}",na_rep="—").background_gradient(cmap="RdYlGn",axis=None),
-                     use_container_width=True)
+        # Custom color coding without matplotlib
+        def color_cell(val):
+            try:
+                v = float(val)
+            except (ValueError, TypeError):
+                return ""
+            if col_key == "NPL":  # past = yaxshi
+                if v < 5: return "background-color: rgba(16,185,129,0.25); color: #34d399"
+                elif v < 10: return "background-color: rgba(245,158,11,0.25); color: #fbbf24"
+                else: return "background-color: rgba(239,68,68,0.25); color: #fca5a5"
+            elif col_key in ("ROA", "ROE"):  # yuqori = yaxshi
+                if v > 1: return "background-color: rgba(16,185,129,0.25); color: #34d399"
+                elif v > 0: return "background-color: rgba(245,158,11,0.25); color: #fbbf24"
+                else: return "background-color: rgba(239,68,68,0.25); color: #fca5a5"
+            elif col_key == "CAR":
+                if v >= 13: return "background-color: rgba(16,185,129,0.25); color: #34d399"
+                elif v >= 10.5: return "background-color: rgba(245,158,11,0.25); color: #fbbf24"
+                else: return "background-color: rgba(239,68,68,0.25); color: #fca5a5"
+            else:  # NIM, BD_it — neytral
+                return "background-color: rgba(59,130,246,0.15); color: #93c5fd"
+        st.dataframe(
+            pivot.style.format("{:.2f}", na_rep="—").applymap(color_cell),
+            use_container_width=True)
 
     with tab2:
         st.markdown("### 🔀 J-Curve effekti: Big Data → ROA")
