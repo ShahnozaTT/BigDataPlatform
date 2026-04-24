@@ -1406,6 +1406,8 @@ elif page == "📊 Tahlil natijalari":
             xaxis=dict(tickvals=YEARS,gridcolor="#334155",title="Yil"),
             yaxis=dict(gridcolor="#334155",title=y_label))
         st.plotly_chart(fig, use_container_width=True)
+        st.markdown(f"#### 📋 {y_label} — banklar × yillar (jadval ko'rinishida)")
+        st.caption("🟢 Yaxshi · 🟡 Me'yorda · 🔴 E'tibor talab qiladi")
         pivot = df_panel.pivot_table(index="Bank",columns="Year",values=col_key,aggfunc="mean").round(2)
         # Custom color coding without matplotlib
         def color_cell(val):
@@ -1447,9 +1449,9 @@ elif page == "📊 Tahlil natijalari":
                 paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(30,41,59,0.5)",font=dict(color="white"),
                 legend=dict(bgcolor="rgba(30,41,59,0.8)"),
                 xaxis=dict(tickvals=YEARS,gridcolor="#334155"),
-                yaxis=dict(title="BD_it (%)",gridcolor="#334155",titlefont=dict(color="#60a5fa")),
-                yaxis2=dict(title="ROA (%)",overlaying="y",side="right",
-                           titlefont=dict(color="#f59e0b"),zeroline=True,zerolinecolor="#64748b"))
+                yaxis=dict(title=dict(text="BD_it (%)",font=dict(color="#60a5fa")),gridcolor="#334155"),
+                yaxis2=dict(title=dict(text="ROA (%)",font=dict(color="#f59e0b")),overlaying="y",side="right",
+                           zeroline=True,zerolinecolor="#64748b"))
             st.plotly_chart(fig_j, use_container_width=True)
         with c2:
             df_sc = df_panel[df_panel["BD_it"].notna()&df_panel["ROA"].notna()].copy()
@@ -1560,6 +1562,8 @@ elif page == "📊 Tahlil natijalari":
                 elif v<0.05: return "background:rgba(245,158,11,0.3);color:#fbbf24"
                 else: return "background:rgba(100,116,139,0.2);color:#94a3b8"
             except: return ""
+        st.markdown("#### 📋 Koeffitsiyentlar jadvali")
+        st.caption("🟢 p<0.01 (juda ahamiyatli) · 🟡 p<0.05 (ahamiyatli) · ⚪ p≥0.05 (ahamiyatli emas)")
         st.dataframe(df_res.style.map(cp,subset=["p-qiymat"])
             .format({"Koeff.":"{:.3f}","Std. xato":"{:.3f}","t-stat":"{:.3f}","p-qiymat":"{:.3f}"}),
             use_container_width=True,hide_index=True)
