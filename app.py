@@ -1495,31 +1495,63 @@ elif page == "📊 Tahlil natijalari":
                             zeroline=True, zerolinecolor="#64748b"))
             st.plotly_chart(fig_j, use_container_width=True)
 
-        # ---- O'NG: Scatter barcha banklar ----
+        # ---- O'NG: Mean J-curve path (6 bank o'rtachasi) ----
         with c2:
             df_sc = df_panel[df_panel["BD_it"].notna() & df_panel[m_key].notna()].copy()
-            fig_sc = go.Figure()
+            # Har yil uchun BD_it va metric o'rtachasi (6 bank)
+            df_mean = df_sc.groupby("Year").agg(
+                BD_it_mean=("BD_it", "mean"),
+                metric_mean=(m_key, "mean"),
+                BD_it_min=("BD_it", "min"),
+                BD_it_max=("BD_it", "max"),
+                metric_min=(m_key, "min"),
+                metric_max=(m_key, "max"),
+            ).reset_index()
+
+            fig_path = go.Figure()
+
+            # Tarqoqlik (yillar bo'yicha) — light background points
             for bank in BANKS:
                 sub = df_sc[df_sc["Bank"]==bank]
                 if len(sub) == 0: continue
-                fig_sc.add_trace(go.Scatter(
+                fig_path.add_trace(go.Scatter(
                     x=sub["BD_it"], y=sub[m_key],
-                    mode="markers+text", name=bank,
-                    text=sub["Year"].astype(str), textposition="top center",
-                    textfont=dict(size=9, color="white"),
-                    marker=dict(size=11, color=BANK_COLORS[bank],
-                               line=dict(width=1, color="white")),
-                    hovertemplate=f"<b>{bank}</b><br>BD_it: %{{x:.2f}}%<br>{m_label}: %{{y:.2f}}<br>%{{text}}<extra></extra>"))
-            fig_sc.add_hline(y=0, line_dash="dash", line_color="#64748b")
-            fig_sc.update_layout(
-                title=f"BD_it vs {m_key} (barcha banklar · 2018–2024)",
+                    mode="markers", name=bank,
+                    marker=dict(size=7, color=BANK_COLORS[bank], opacity=0.4,
+                               line=dict(width=0)),
+                    showlegend=True,
+                    hovertemplate=f"<b>{bank}</b> %{{customdata}}<br>BD_it: %{{x:.2f}}%<br>{m_key}: %{{y:.2f}}<extra></extra>",
+                    customdata=sub["Year"]))
+
+            # O'RTACHA YO'L — asosiy J-curve chizig'i
+            fig_path.add_trace(go.Scatter(
+                x=df_mean["BD_it_mean"], y=df_mean["metric_mean"],
+                mode="lines+markers+text",
+                name="O'rtacha yo'l (J-curve)",
+                text=df_mean["Year"].astype(str),
+                textposition="top center",
+                textfont=dict(size=11, color="#fbbf24", family="Arial Black"),
+                line=dict(color="#fbbf24", width=4),
+                marker=dict(size=14, color="#fbbf24",
+                           line=dict(width=2, color="white"), symbol="circle"),
+                hovertemplate="<b>%{text} (o'rtacha)</b><br>BD_it: %{x:.2f}%<br>"+f"{m_key}: %{{y:.2f}}<extra></extra>"))
+
+            fig_path.add_hline(y=0, line_dash="dash", line_color="#64748b", line_width=1)
+
+            fig_path.update_layout(
+                title=f"J-curve yo'li: 6 bank o'rtachasi (2018→2024)",
                 height=380,
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(30,41,59,0.5)",
                 font=dict(color="white"),
-                legend=dict(bgcolor="rgba(30,41,59,0.8)", font=dict(size=10)),
-                xaxis=dict(title="BD_it (%)", gridcolor="#334155"),
-                yaxis=dict(title=m_label, gridcolor="#334155"))
-            st.plotly_chart(fig_sc, use_container_width=True)
+                legend=dict(bgcolor="rgba(30,41,59,0.8)", font=dict(size=9),
+                           x=0.01, y=0.99),
+                xaxis=dict(title="BD_it (%) — Big Data indeksi", gridcolor="#334155"),
+                yaxis=dict(title=m_label, gridcolor="#334155"),
+                hovermode="closest")
+            st.plotly_chart(fig_path, use_container_width=True)
+            st.caption(f"🟡 Sariq qalin chiziq — har yil uchun 6 bank o'rtachasi. "
+                      f"Rangli nuqtalar — individual banklar.")
+
 
         # J-Curve ta'rifi (tanlangan ko'rsatkich uchun)
         if is_inverse:
@@ -1581,27 +1613,65 @@ elif page == "📊 Tahlil natijalari":
                 paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(30,41,59,0.5)",font=dict(color="white"),
                 xaxis=dict(title="BD_it (%)",gridcolor="#334155"),yaxis=dict(gridcolor="#334155"))
             st.plotly_chart(fig_bd, use_container_width=True)
-        # Radar
-        df_avg = df_panel[df_panel["Year"].isin([2023,2024])].groupby("Bank")[["ROA","NPL","CAR","NIM","BD_it"]].mean().round(2)
-        df_norm = df_avg.copy()
-        for col in df_norm.columns:
-            mn,mx = df_norm[col].min(),df_norm[col].max()
-            if mx>mn:
-                df_norm[col] = (100-(df_norm[col]-mn)/(mx-mn)*100) if col=="NPL" else (df_norm[col]-mn)/(mx-mn)*100
-            else: df_norm[col]=50
-        cats = ["ROA","NPL↓","CAR","NIM","BD_it"]
-        fig_r = go.Figure()
-        for bank in BANKS:
-            if bank in df_norm.index:
-                v = df_norm.loc[bank].tolist(); v_c = v+[v[0]]; c_c = cats+[cats[0]]
-                fig_r.add_trace(go.Scatterpolar(r=v_c,theta=c_c,fill="toself",name=bank,
-                    line_color=BANK_COLORS[bank],opacity=0.8))
-        fig_r.update_layout(polar=dict(radialaxis=dict(visible=True,range=[0,100],gridcolor="#334155"),
-            angularaxis=dict(gridcolor="#334155",tickfont=dict(color="#f1f5f9"))),
-            height=420,paper_bgcolor="rgba(0,0,0,0)",font=dict(color="white"),
-            legend=dict(bgcolor="rgba(30,41,59,0.8)"),showlegend=True)
-        st.plotly_chart(fig_r, use_container_width=True)
-        st.caption("Radar: normalizatsiya (0–100). NPL↓ = past NPL yaxshi.")
+
+        # ===== HEATMAP: 6 bank x 6 KPI (2024) =====
+        st.markdown("#### 🌡️ Heatmap: 6 bank × KPI (2024 yil)")
+        st.caption("🟢 Yaxshi · 🟡 O'rtacha · 🔴 Yomon — har KPI bo'yicha banklar reytingi")
+
+        df_hm = df_panel[df_panel["Year"]==2024].set_index("Bank")[["ROA","ROE","NPL","CAR","NIM","BD_it"]]
+
+        # Normalize for heatmap (0-100 scale, higher = better)
+        hm_normalized = df_hm.copy()
+        for col in hm_normalized.columns:
+            vals = hm_normalized[col].dropna()
+            if len(vals) == 0: continue
+            mn, mx = vals.min(), vals.max()
+            if mx > mn:
+                if col == "NPL":  # lower = better
+                    hm_normalized[col] = 100 - (hm_normalized[col] - mn) / (mx - mn) * 100
+                else:
+                    hm_normalized[col] = (hm_normalized[col] - mn) / (mx - mn) * 100
+
+        # Hover texts with actual values
+        hover_text = [[f"<b>{bank}</b><br>{kpi}: {df_hm.loc[bank, kpi]:.2f}%"
+                      if pd.notna(df_hm.loc[bank, kpi]) else f"<b>{bank}</b><br>{kpi}: yo'q"
+                      for kpi in df_hm.columns]
+                     for bank in df_hm.index]
+
+        # Display values (actual numbers shown on cells)
+        display_vals = df_hm.round(2).astype(object).fillna("—").values
+
+        fig_hm = go.Figure(go.Heatmap(
+            z=hm_normalized.values,
+            x=df_hm.columns,
+            y=df_hm.index,
+            text=display_vals,
+            texttemplate="%{text}",
+            textfont=dict(size=13, color="white"),
+            hovertext=hover_text,
+            hoverinfo="text",
+            colorscale=[
+                [0.0, "#ef4444"],   # qizil
+                [0.5, "#f59e0b"],   # sariq
+                [1.0, "#10b981"],   # yashil
+            ],
+            showscale=True,
+            colorbar=dict(title="Reyting", tickvals=[0, 50, 100],
+                         ticktext=["Yomon", "O'rtacha", "Yaxshi"],
+                         tickfont=dict(color="#cbd5e1")),
+        ))
+        fig_hm.update_layout(
+            title="Banklar reytingi (2024) — NPL uchun past = yaxshi",
+            height=380,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(30,41,59,0.5)",
+            font=dict(color="white"),
+            xaxis=dict(title="", side="top", tickfont=dict(size=12)),
+            yaxis=dict(title="", tickfont=dict(size=12)),
+        )
+        st.plotly_chart(fig_hm, use_container_width=True)
+        st.caption("🔢 Hujayra ichidagi son — haqiqiy qiymat (%). 🎨 Rang — banklar orasida nisbatan reyting.")
+
 
     with tab4:
         st.markdown("### 🧮 Panel Fixed Effects natijalari")
