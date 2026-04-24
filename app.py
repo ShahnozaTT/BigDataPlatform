@@ -1428,7 +1428,7 @@ elif page == "📊 Tahlil natijalari":
             else:  # NIM, BD_it — neytral
                 return "background-color: rgba(59,130,246,0.15); color: #93c5fd"
         st.dataframe(
-            pivot.style.format("{:.2f}", na_rep="—").applymap(color_cell),
+            pivot.style.format("{:.2f}", na_rep="—").map(color_cell),
             use_container_width=True)
 
     with tab2:
@@ -1560,7 +1560,7 @@ elif page == "📊 Tahlil natijalari":
                 elif v<0.05: return "background:rgba(245,158,11,0.3);color:#fbbf24"
                 else: return "background:rgba(100,116,139,0.2);color:#94a3b8"
             except: return ""
-        st.dataframe(df_res.style.applymap(cp,subset=["p-qiymat"])
+        st.dataframe(df_res.style.map(cp,subset=["p-qiymat"])
             .format({"Koeff.":"{:.3f}","Std. xato":"{:.3f}","t-stat":"{:.3f}","p-qiymat":"{:.3f}"}),
             use_container_width=True,hide_index=True)
         c1,c2,c3,c4 = st.columns(4)
